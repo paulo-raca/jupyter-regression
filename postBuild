@@ -1,4 +1,4 @@
-pip install python-highcharts sympy numpy pandas scipy sklearn
+pip install python-highcharts sympy numpy pandas scipy sklearn tensorflow tensorboard dataclasses toposort
 easy_install https://github.com/paulo-raca/jupyter_scisheets_widget/raw/master/dist/jupyter_scisheets_widget-0.1.0a0-py3.6.egg
 jupyter nbextension install --py --symlink --sys-prefix jupyter_scisheets_widget
 jupyter nbextension enable --py --sys-prefix jupyter_scisheets_widget
