@@ -8,6 +8,8 @@ from sympy.physics.units.dimensions import dimsys_SI
 import pandas as pd
 import toposort
 import tensorflow as tf
+from time import time
+from math import inf
 
 def si_dimension_scale(expr: sympy.Expr) -> Dimension:
     return Quantity._collect_factor_and_dimension(expr)[0]
@@ -46,6 +48,10 @@ class Parameter(Symbol):
 
     E.g., on Hooke's law, the parameter is `k`, the sprint constant
     """
+
+    initial_guess: float
+    range: typing.Tuple[float, float]
+
     pass
 
 @dataclass
@@ -130,11 +136,13 @@ class DataFit:
     def __getattr__(self, name):
         return self.symbols[name].symbol
 
-    def add_parameter(self, name: str, units: sympy.Expr, description: str):
+    def add_parameter(self, name: str, units: sympy.Expr, description: str, initial_guess = 0, range = (-inf, +inf)):
         self.symbols[name] = Parameter(
             symbol = sympy.Symbol(name),
             description = description,
-            units = units
+            units = units,
+            initial_guess = initial_guess,
+            range = range
         )
 
     def add_experimental_data(self, name: str, units: sympy.Expr, description: str):
@@ -156,6 +164,7 @@ class DataFit:
 
     def add_differential_expr(self, name: str, units: sympy.Expr, expr: sympy.Expr, differential: sympy.Symbol, initial_value: sympy.Expr, description: str):
         assert_same_dimension(units, self._units(expr*differential))
+        assert_same_dimension(units, self._units(initial_value))
         self.symbols[name] = OrdinaryDifferential(
             symbol = sympy.Symbol(name),
             description = description,
@@ -237,17 +246,33 @@ class DataFit:
             tf_symbols = {}
             tf_objectives = []
 
+            def make_range_constraint(min, max):
+                return lambda t: tf.clip_by_value(t, min, max)
+
             for symbol in symbols_ordered:
                 if isinstance(symbol, ExperimentalData):
                     with scope_experimental_data:
-                        tf_symbols[symbol.name] = tf.placeholder(tf.float32, shape=(None), name=symbol.name)
+                        tf_symbols[symbol.name] = tf.placeholder(
+                            name = symbol.name,
+                            dtype = tf.float64,
+                            shape = (None))
+
                 elif isinstance(symbol, Parameter):
                     with scope_param:
-                        tf_symbols[symbol.name] = tf.Variable(1, name=symbol.name, dtype=tf.float32, expected_shape=())
+                        tf_symbols[symbol.name] = tf.Variable(
+                            name=symbol.name,
+                            dtype = tf.float64,
+                            expected_shape = (),
+                            initial_value = symbol.initial_guess,
+                            constraint = make_range_constraint(symbol.range[0], symbol.range[1]))
+
                 elif isinstance(symbol, Expression):
                     with scope_expressions:
                         with tf.name_scope(symbol.name):
-                            tf_symbols[symbol.name] = tf.identity(self._expr_to_tensor(symbol.expr, symbol.units, tf_symbols), name='value')
+                            tf_symbols[symbol.name] = tf.identity(
+                                self._expr_to_tensor(symbol.expr, symbol.units, tf_symbols),
+                                name='value')
+
                 elif isinstance(symbol, _CompositeOrdinaryDifferential):
                     with scope_expressions:
                         with tf.name_scope(symbol.name):
@@ -263,13 +288,19 @@ class DataFit:
                                     replacements.update(dict(zip([x.name for x in symbol.differentials], tf.unstack(y))))
 
                                     ret = tf.stack([
-                                        tf.identity(self._expr_to_tensor(differential.expr, differential.units / t_symbol.units, replacements), name=f'derivative_{differential.name}')
-                                        for differential in symbol.differentials
+                                       tf.identity(self._expr_to_tensor(differential.expr, differential.units / t_symbol.units, replacements), name=f'derivative_{differential.name}')
+                                       for differential in symbol.differentials
                                     ], name='derivatives')
+
                                     return ret
                                 return func
-                            tf_odeint = tf.contrib.integrate.odeint(create_func(symbol, tf_symbols), y0, tf_symbols[symbol.differential.name])
-                            tf_symbols[symbol.name] = tf.transpose(tf_odeint[:,:], name='value')
+                            tf_odeint = tf.contrib.integrate.odeint_fixed(
+                                func = create_func(symbol, tf_symbols),
+                                y0 = y0,
+                                t = tf.concat([[0], tf_symbols[symbol.differential.name]], axis=0),
+                                dt=0.1)
+                            tf_symbols[symbol.name] = tf.transpose(tf_odeint[1:, :], name='value')
+
                 elif isinstance(symbol, OrdinaryDifferential):
                     with scope_expressions:
                         with tf.name_scope(symbol.name):
@@ -293,12 +324,11 @@ class DataFit:
 
         return graph, tf_symbols, tf_total_loss
 
-    def fit(self, experimental_data: pd.DataFrame, N: int = 1000) -> typing.Dict[str, float]:
+    def fit(self, experimental_data: pd.DataFrame, N: int = 1000, v: bool = False, learning_rate: float = 0.1) -> typing.Dict[str, float]:
         graph, tf_symbols, tf_total_loss = self.to_tensorflow()
         with graph.as_default():
-
             with tf.name_scope('optimizer/'):
-                optimizer = tf.train.AdamOptimizer(learning_rate=1)
+                optimizer = tf.train.AdamOptimizer(learning_rate=0.1)
                 train_op = optimizer.minimize(tf_total_loss)
 
             tf_in = {}
@@ -314,10 +344,19 @@ class DataFit:
             with tf.Session().as_default() as session:
                 session.run(tf.global_variables_initializer())
 
+                print_int = 1
+                start_t = time()
+                print_t = start_t + print_int
+
                 for i in range(N):
-                    session.run(train_op, feed_dict = tf_in)
-                    outputs, loss = session.run([tf_out, tf_total_loss], feed_dict = tf_in)
-                    print(dict(zip(tf_out_names, outputs)), loss, i)
+                    now = time()
+                    if v and now >= print_t:
+                        outputs, loss, _ = session.run([tf_out, tf_total_loss, train_op], feed_dict = tf_in)
+                        print("Train state", dict(zip(tf_out_names, outputs)), loss, i)
+                        print_t = now + print_int
+
+                    else:
+                        session.run([train_op], feed_dict = tf_in)
 
                 outputs = session.run(tf_out, feed_dict = tf_in)
                 outputs = dict(zip(tf_out_names, outputs))

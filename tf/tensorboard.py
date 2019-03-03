@@ -47,6 +47,6 @@ def show_graph(graph_def = None, max_const_size=32, height=800):
     """
 
     iframe = f"""
-        <iframe seamless style="width:1200px;height:{height}px;border:0" srcdoc={quoteattr(code)}></iframe>
+        <iframe seamless style="width:100%;height:{height}px;border:0" srcdoc={quoteattr(code)}></iframe>
     """
     display(HTML(iframe))
