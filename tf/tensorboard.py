@@ -4,7 +4,6 @@ import json
 from xml.sax.saxutils import quoteattr
 
 
-
 def strip_graph_consts(graph_def, max_const_size=32):
     """
     Strip large constant values from graph_def.
@@ -17,10 +16,11 @@ def strip_graph_consts(graph_def, max_const_size=32):
             tensor = n.attr['value'].tensor
             size = len(tensor.tensor_content)
             if size > max_const_size:
-                tensor.tensor_content = "<stripped %d bytes>"%size
+                tensor.tensor_content = "<stripped {size} bytes>"
     return strip_def
 
-def show_graph(graph_def = None, max_const_size=32, height=800):
+
+def show_graph(graph_def=None, max_const_size=32, height=800):
     """
     Embed a visualization of the Tensorflow Graph inside the jupyter notebook.
 

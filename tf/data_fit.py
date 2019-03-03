@@ -1,26 +1,31 @@
 import typing
-from dataclasses import dataclass
-from collections import defaultdict
-from enum import Enum
 import sympy
-from sympy.physics.units import Dimension, Quantity
-from sympy.physics.units.dimensions import dimsys_SI
 import pandas as pd
 import toposort
 import tensorflow as tf
 from time import time
 from math import inf
+from dataclasses import dataclass
+from collections import defaultdict
+from sympy.physics.units import Dimension, Quantity
+from sympy.physics.units.dimensions import dimsys_SI
+
 
 def si_dimension_scale(expr: sympy.Expr) -> Dimension:
     return Quantity._collect_factor_and_dimension(expr)[0]
 
+
 def dimension(expr: sympy.Expr) -> Dimension:
     return Quantity._collect_factor_and_dimension(expr)[1]
+
 
 def assert_same_dimension(expected: sympy.Expr, actual: sympy.Expr):
     expected_dim = dimension(expected)
     actual_dim = dimension(actual)
-    assert dimsys_SI.equivalent_dims(expected_dim, actual_dim), f"Incompatible dimensions, expected {expected_dim}, but actually is {actual_dim}"
+    assert \
+        dimsys_SI.equivalent_dims(expected_dim, actual_dim), \
+        f"Incompatible dimensions, expected {expected_dim}, but actually is {actual_dim}"
+
 
 @dataclass
 class Symbol:
@@ -34,11 +39,12 @@ class Symbol:
 
     @property
     def dimension(self) -> Dimension:
-        return _dimension(self.units)
+        return dimension(self.units)
 
     @property
     def depends(self) -> typing.List[sympy.Symbol]:
         return []
+
 
 @dataclass
 class Parameter(Symbol):
@@ -54,6 +60,7 @@ class Parameter(Symbol):
 
     pass
 
+
 @dataclass
 class ExperimentalData(Symbol):
     """
@@ -62,6 +69,7 @@ class ExperimentalData(Symbol):
     E.g., on Hooke's law, the experimental data is `F_exp` and `x`, the measured force and displacement
     """
     pass
+
 
 @dataclass
 class Expression(Symbol):
@@ -96,7 +104,8 @@ class OptimizationObjective(Symbol):
     """
     Optimization where we want to minimize the difference between actual and prediction model
 
-    E.g., on Hooke's law, we want to minimize the difference between `F_exp` and `F`, the force measured experimentally and the force predicted by the model
+    E.g., on Hooke's law, we want to minimize the difference between `F_exp` and `F`,
+    the force measured experimentally and the force predicted by the model
     """
     actual: sympy.Expr
     prediction: sympy.Expr
@@ -105,7 +114,6 @@ class OptimizationObjective(Symbol):
     @property
     def depends(self) -> typing.List[sympy.Symbol]:
         return (self.actual + self.prediction).free_symbols
-
 
 
 @dataclass
@@ -136,54 +144,53 @@ class DataFit:
     def __getattr__(self, name):
         return self.symbols[name].symbol
 
-    def add_parameter(self, name: str, units: sympy.Expr, description: str, initial_guess = 0, range = (-inf, +inf)):
+    def add_parameter(self, name: str, units: sympy.Expr, description: str, initial_guess: float = 0, range: typing.Tuple[float, float] = (-inf, +inf)):
         self.symbols[name] = Parameter(
-            symbol = sympy.Symbol(name),
-            description = description,
-            units = units,
-            initial_guess = initial_guess,
-            range = range
+            symbol=sympy.Symbol(name),
+            description=description,
+            units=units,
+            initial_guess=initial_guess,
+            range=range
         )
 
     def add_experimental_data(self, name: str, units: sympy.Expr, description: str):
         self.symbols[name] = ExperimentalData(
-            symbol = sympy.Symbol(name),
-            description = description,
-            units = units
+            symbol=sympy.Symbol(name),
+            description=description,
+            units=units
         )
 
     def add_expr(self, name: str, units: sympy.Expr, expr: sympy.Expr, description: str):
         assert_same_dimension(units, self._units(expr))
         self.symbols[name] = Expression(
-            symbol = sympy.Symbol(name),
-            description = description,
-            units = units,
-            expr = expr
+            symbol=sympy.Symbol(name),
+            description=description,
+            units=units,
+            expr=expr
         )
-
 
     def add_differential_expr(self, name: str, units: sympy.Expr, expr: sympy.Expr, differential: sympy.Symbol, initial_value: sympy.Expr, description: str):
         assert_same_dimension(units, self._units(expr*differential))
         assert_same_dimension(units, self._units(initial_value))
         self.symbols[name] = OrdinaryDifferential(
-            symbol = sympy.Symbol(name),
-            description = description,
-            units = units,
-            expr = expr,
-            differential = differential,
-            initial_value = initial_value
+            symbol=sympy.Symbol(name),
+            description=description,
+            units=units,
+            expr=expr,
+            differential=differential,
+            initial_value=initial_value
         )
 
     def add_optimization_objective(self, name: str, units: sympy.Expr, actual: sympy.Expr, prediction: sympy.Expr, weight: float = 1, description: str = 'MSE'):
         assert_same_dimension(units, self._units(actual))
         assert_same_dimension(units, self._units(prediction))
         self.symbols[name] = OptimizationObjective(
-            symbol = sympy.Symbol(name),
-            description = description,
-            units = units,
-            actual = actual,
-            prediction = prediction,
-            weight = weight
+            symbol=sympy.Symbol(name),
+            description=description,
+            units=units,
+            actual=actual,
+            prediction=prediction,
+            weight=weight
         )
 
     def _units(self, expr):
@@ -221,13 +228,13 @@ class DataFit:
             topology_symbols = defaultdict(set)
             for symbol in self.symbols.values():
                 if isinstance(symbol, OrdinaryDifferential):
-                    if not symbol.differential in differentials:
+                    if symbol.differential not in differentials:
                         differential = _CompositeOrdinaryDifferential(
-                            symbol = sympy.Symbol(f'integral-{symbol.differential.name}'),
-                            units = 1, # Not used, and really doesn't make sense here
-                            description = f'Simultaneos differential integration on {symbol.differential.name}',
-                            differential = symbol.differential,
-                            differentials = []
+                            symbol=sympy.Symbol(f'integral-{symbol.differential.name}'),
+                            units=1,  # Not used, and really doesn't make sense here
+                            description=f'Simultaneos differential integration on {symbol.differential.name}',
+                            differential=symbol.differential,
+                            differentials=[]
                         )
                         differentials[symbol.differential] = differential
                         all_symbols[differential.name] = differential
@@ -253,18 +260,18 @@ class DataFit:
                 if isinstance(symbol, ExperimentalData):
                     with scope_experimental_data:
                         tf_symbols[symbol.name] = tf.placeholder(
-                            name = symbol.name,
-                            dtype = tf.float64,
-                            shape = (None))
+                            name=symbol.name,
+                            dtype=tf.float64,
+                            shape=(None))
 
                 elif isinstance(symbol, Parameter):
                     with scope_param:
                         tf_symbols[symbol.name] = tf.Variable(
                             name=symbol.name,
-                            dtype = tf.float64,
-                            expected_shape = (),
-                            initial_value = symbol.initial_guess,
-                            constraint = make_range_constraint(symbol.range[0], symbol.range[1]))
+                            dtype=tf.float64,
+                            expected_shape=(),
+                            initial_value=symbol.initial_guess,
+                            constraint=make_range_constraint(symbol.range[0], symbol.range[1]))
 
                 elif isinstance(symbol, Expression):
                     with scope_expressions:
@@ -276,28 +283,33 @@ class DataFit:
                 elif isinstance(symbol, _CompositeOrdinaryDifferential):
                     with scope_expressions:
                         with tf.name_scope(symbol.name):
-                            y0 = tf.stack([
-                                self._expr_to_tensor(differential.initial_value, differential.units, tf_symbols)
-                                for differential in symbol.differentials
-                            ], name='initial_values')
+                            y0 = tf.stack(
+                                [
+                                    self._expr_to_tensor(differential.initial_value, differential.units, tf_symbols)
+                                    for differential in symbol.differentials
+                                ],
+                                name='initial_values')
+
                             def create_func(symbol, tf_symbols):
                                 t_symbol = self.symbols[symbol.differential.name]
+
                                 def func(y, t):
                                     replacements = dict(tf_symbols)
                                     replacements[t_symbol.name] = t
                                     replacements.update(dict(zip([x.name for x in symbol.differentials], tf.unstack(y))))
 
-                                    ret = tf.stack([
-                                       tf.identity(self._expr_to_tensor(differential.expr, differential.units / t_symbol.units, replacements), name=f'derivative_{differential.name}')
-                                       for differential in symbol.differentials
-                                    ], name='derivatives')
-
-                                    return ret
+                                    return tf.stack(
+                                        [
+                                            tf.identity(self._expr_to_tensor(differential.expr, differential.units / t_symbol.units, replacements), name=f'derivative_{differential.name}')
+                                            for differential in symbol.differentials
+                                        ],
+                                        name='derivatives')
                                 return func
+
                             tf_odeint = tf.contrib.integrate.odeint_fixed(
-                                func = create_func(symbol, tf_symbols),
-                                y0 = y0,
-                                t = tf.concat([[0], tf_symbols[symbol.differential.name]], axis=0),
+                                func=create_func(symbol, tf_symbols),
+                                y0=y0,
+                                t=tf.concat([[0], tf_symbols[symbol.differential.name]], axis=0),
                                 dt=0.1)
                             tf_symbols[symbol.name] = tf.transpose(tf_odeint[1:, :], name='value')
 
@@ -306,14 +318,20 @@ class DataFit:
                         with tf.name_scope(symbol.name):
                             composite_symbol = differentials[symbol.differential]
                             composite_index = composite_symbol.differentials.index(symbol)
-                            tf_symbols[symbol.name] = tf.identity(tf_symbols[composite_symbol.name][composite_index, :], name='value')
+                            tf_symbols[symbol.name] = tf.identity(
+                                tf_symbols[composite_symbol.name][composite_index, :],
+                                name='value')
 
                 elif isinstance(symbol, OptimizationObjective):
                     with scope_objectives:
                         with tf.name_scope(symbol.name):
-                            tf_actual = tf.identity(self._expr_to_tensor(symbol.actual, symbol.units, tf_symbols), name='actual')
-                            tf_prediction = tf.identity(self._expr_to_tensor(symbol.prediction, symbol.units, tf_symbols), name='prediction')
-                            tf_loss = tf.losses.mean_squared_error(tf_actual, tf_prediction, weights = symbol.weight)
+                            tf_actual = tf.identity(
+                                self._expr_to_tensor(symbol.actual, symbol.units, tf_symbols),
+                                name='actual')
+                            tf_prediction = tf.identity(
+                                self._expr_to_tensor(symbol.prediction, symbol.units, tf_symbols),
+                                name='prediction')
+                            tf_loss = tf.losses.mean_squared_error(tf_actual, tf_prediction, weights=symbol.weight)
                             tf_symbols[symbol.name] = tf_loss
                             tf_objectives.append(tf_loss)
                 else:
@@ -351,13 +369,13 @@ class DataFit:
                 for i in range(N):
                     now = time()
                     if v and now >= print_t:
-                        outputs, loss, _ = session.run([tf_out, tf_total_loss, train_op], feed_dict = tf_in)
+                        outputs, loss, _ = session.run([tf_out, tf_total_loss, train_op], feed_dict=tf_in)
                         print("Train state", dict(zip(tf_out_names, outputs)), loss, i)
                         print_t = now + print_int
 
                     else:
-                        session.run([train_op], feed_dict = tf_in)
+                        session.run([train_op], feed_dict=tf_in)
 
-                outputs = session.run(tf_out, feed_dict = tf_in)
+                outputs = session.run(tf_out, feed_dict=tf_in)
                 outputs = dict(zip(tf_out_names, outputs))
                 return outputs
