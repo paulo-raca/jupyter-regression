@@ -47,6 +47,19 @@ class Symbol:
 
 
 @dataclass
+class Constant(Symbol):
+    """
+    A known constant.
+
+    E.g., G, the gravitational constant
+    """
+
+    value: float
+
+    pass
+
+
+@dataclass
 class Parameter(Symbol):
     """
     A placeholder for output parameters, obtained by fitting the ExperimentalData
@@ -144,6 +157,14 @@ class DataFit:
     def __getattr__(self, name):
         return self.symbols[name].symbol
 
+    def add_constant(self, name: str, value: float, units: sympy.Expr, description: str):
+        self.symbols[name] = Constant(
+            symbol=sympy.Symbol(name),
+            description=description,
+            value=value,
+            units=units,
+        )
+
     def add_parameter(self, name: str, units: sympy.Expr, description: str, initial_guess: float = 0, range: typing.Tuple[float, float] = (-inf, +inf)):
         self.symbols[name] = Parameter(
             symbol=sympy.Symbol(name),
@@ -218,6 +239,7 @@ class DataFit:
     def to_tensorflow(self) -> typing.Tuple[tf.Graph, typing.Dict[str, tf.Tensor]]:
         graph = tf.Graph()
         with graph.as_default():
+            scope_constants = tf.name_scope('constants/')
             scope_param = tf.name_scope('output_parameters/')
             scope_experimental_data = tf.name_scope('experimental_data/')
             scope_expressions = tf.name_scope('expressions/')
@@ -263,6 +285,13 @@ class DataFit:
                             name=symbol.name,
                             dtype=tf.float64,
                             shape=(None))
+
+                elif isinstance(symbol, Constant):
+                    with scope_constants:
+                        tf_symbols[symbol.name] = tf.constant(
+                            value=symbol.value,
+                            name=symbol.name,
+                            dtype=tf.float64)
 
                 elif isinstance(symbol, Parameter):
                     with scope_param:
@@ -349,6 +378,8 @@ class DataFit:
                 optimizer = tf.train.AdamOptimizer(learning_rate=0.1)
                 train_op = optimizer.minimize(tf_total_loss)
 
+            grad_vars = []
+
             tf_in = {}
             tf_out = []
             tf_out_names = []
@@ -356,8 +387,18 @@ class DataFit:
                 if isinstance(symbol, ExperimentalData):
                     tf_in[tf_symbols[symbol.name]] = experimental_data[symbol.name]
                 else:
+                    grad_vars.append(symbol.name)
+
                     tf_out.append(tf_symbols[symbol.name])
                     tf_out_names.append(symbol.name)
+
+            for grad_out in grad_vars:
+                grads = tf.gradients(tf_symbols[grad_out], [tf_symbols[grad_in] for grad_in in grad_vars])
+                for grad_in, grad in zip(grad_vars, grads):
+                    if grad_in != grad_out and grad is not None:
+                        print(f"∂{grad_out}/∂{grad_in} = {grad}")
+                        tf_out.append(grad)
+                        tf_out_names.append(f"∂{grad_out}/∂{grad_in}")
 
             with tf.Session().as_default() as session:
                 session.run(tf.global_variables_initializer())
