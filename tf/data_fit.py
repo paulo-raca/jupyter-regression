@@ -3,6 +3,7 @@ import sympy
 import pandas as pd
 import toposort
 import tensorflow as tf
+from io import StringIO
 from time import time
 from math import inf
 from dataclasses import dataclass
@@ -427,3 +428,8 @@ class DataFit:
                 outputs = session.run(tf_out, feed_dict=tf_in)
                 outputs = dict(zip(tf_out_names, outputs))
                 return outputs
+
+def data_csv(data, **kwargs):
+    return pd.read_csv(StringIO(data), **kwargs)
+def data_tsv(data, **kwargs):
+    return data_csv(data, sep='\t', **kwargs)
