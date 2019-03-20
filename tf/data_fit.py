@@ -157,62 +157,69 @@ class DataFit:
     def __getattr__(self, name):
         return self.symbols[name].symbol
 
+    def __getitem__(self, name):
+        return self.symbols[name].symbol
+
+    def _add(self, symbol: Symbol):
+        self.symbols[symbol.name] = symbol
+        return symbol.symbol
+
     def add_constant(self, name: str, value: float, units: sympy.Expr, description: str):
-        self.symbols[name] = Constant(
+        return self._add(Constant(
             symbol=sympy.Symbol(name),
             description=description,
             value=value,
             units=units,
-        )
+        ))
 
     def add_parameter(self, name: str, units: sympy.Expr, description: str, initial_guess: float = 0, range: typing.Tuple[float, float] = (-inf, +inf)):
-        self.symbols[name] = Parameter(
+        return self._add(Parameter(
             symbol=sympy.Symbol(name),
             description=description,
             units=units,
             initial_guess=initial_guess,
             range=range
-        )
+        ))
 
     def add_experimental_data(self, name: str, units: sympy.Expr, description: str):
-        self.symbols[name] = ExperimentalData(
+        return self._add(ExperimentalData(
             symbol=sympy.Symbol(name),
             description=description,
             units=units
-        )
+        ))
 
     def add_expr(self, name: str, units: sympy.Expr, expr: sympy.Expr, description: str):
         assert_same_dimension(units, self._units(expr))
-        self.symbols[name] = Expression(
+        return self._add(Expression(
             symbol=sympy.Symbol(name),
             description=description,
             units=units,
             expr=expr
-        )
+        ))
 
     def add_differential_expr(self, name: str, units: sympy.Expr, expr: sympy.Expr, differential: sympy.Symbol, initial_value: sympy.Expr, description: str):
         assert_same_dimension(units, self._units(expr*differential))
         assert_same_dimension(units, self._units(initial_value))
-        self.symbols[name] = OrdinaryDifferential(
+        return self._add(OrdinaryDifferential(
             symbol=sympy.Symbol(name),
             description=description,
             units=units,
             expr=expr,
             differential=differential,
             initial_value=initial_value
-        )
+        ))
 
     def add_optimization_objective(self, name: str, units: sympy.Expr, actual: sympy.Expr, prediction: sympy.Expr, weight: float = 1, description: str = 'MSE'):
         assert_same_dimension(units, self._units(actual))
         assert_same_dimension(units, self._units(prediction))
-        self.symbols[name] = OptimizationObjective(
+        return self._add(OptimizationObjective(
             symbol=sympy.Symbol(name),
             description=description,
             units=units,
             actual=actual,
             prediction=prediction,
             weight=weight
-        )
+        ))
 
     def _units(self, expr):
         return expr.subs([
